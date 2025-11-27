@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -6,14 +6,14 @@ import {
   BarChart3,
   Settings,
   Activity,
-  Thermometer,
-  Gauge,
-  Droplets,
-  TrendingUp,
   AlertCircle,
   CheckCircle,
   User,
-  Clock
+  Clock,
+  Shield,
+  Bell,
+  Timer,
+  TrendingUp
 } from 'lucide-react';
 
 // TEP Data Generation
@@ -25,7 +25,7 @@ const generateTEPData = () => {
       name: `XMEAS_${i}`,
       value: Math.random() * 100,
       risk: Math.random() * 100,
-      status: Math.random() > 0.8 ? 'warning' : 'normal',
+      status: Math.random() > 0.8 ? 'Critical' : 'Normal',
       type: i <= 13 ? 'temperature' : i <= 26 ? 'pressure' : i <= 39 ? 'flow' : 'composition'
     });
   }
@@ -38,6 +38,24 @@ function App() {
   const [selectedSensors, setSelectedSensors] = useState([1, 2, 3]);
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
   const [activeNav, setActiveNav] = useState('dashboard');
+  const [dataLog, setDataLog] = useState([]);
+  const startTime = useRef(new Date());
+
+  // Calculate uptime
+  const [uptime, setUptime] = useState('0h 0m');
+
+  useEffect(() => {
+    const updateUptime = () => {
+      const now = new Date();
+      const diff = Math.floor((now - startTime.current) / 1000);
+      const hours = Math.floor(diff / 3600);
+      const minutes = Math.floor((diff % 3600) / 60);
+      setUptime(`${hours}h ${minutes}m`);
+    };
+
+    const timer = setInterval(updateUptime, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Update time every second
   useEffect(() => {
@@ -48,10 +66,9 @@ function App() {
   }, []);
 
   // KPI calculations
-  const avgTemperature = sensors.filter(s => s.type === 'temperature').reduce((acc, s) => acc + s.value, 0) / sensors.filter(s => s.type === 'temperature').length;
-  const avgPressure = sensors.filter(s => s.type === 'pressure').reduce((acc, s) => acc + s.value, 0) / sensors.filter(s => s.type === 'pressure').length;
-  const avgFlow = sensors.filter(s => s.type === 'flow').reduce((acc, s) => acc + s.value, 0) / sensors.filter(s => s.type === 'flow').length;
-  const systemHealth = sensors.filter(s => s.status === 'normal').length / sensors.length * 100;
+  const avgRiskScore = sensors.reduce((acc, s) => acc + s.risk, 0) / sensors.length;
+  const alertCount = sensors.filter(s => s.status === 'Critical').length;
+  const systemStatus = alertCount === 0 ? 'NORMAL' : alertCount < 5 ? 'WARNING' : 'CRITICAL';
 
   // Real-time data updates
   useEffect(() => {
@@ -61,11 +78,12 @@ function App() {
           ...s,
           value: Math.max(0, Math.min(100, s.value + (Math.random() - 0.5) * 5)),
           risk: Math.max(0, Math.min(100, s.risk + (Math.random() - 0.5) * 3)),
-          status: Math.random() > 0.9 ? 'warning' : s.value > 80 ? 'warning' : 'normal'
+          status: Math.random() > 0.85 ? 'Critical' : 'Normal'
         }));
         return updated.sort((a, b) => b.risk - a.risk);
       });
 
+      // Update chart data
       setChartData(prev => {
         const newData = [...prev.slice(-29)];
         const dataPoint = {
@@ -81,6 +99,18 @@ function App() {
 
         newData.push(dataPoint);
         return newData;
+      });
+
+      // Update data log
+      setDataLog(prev => {
+        const recentSensors = sensors.slice(0, 5).map((s, idx) => ({
+          no: prev.length + idx + 1,
+          time: new Date().toLocaleTimeString(),
+          sensorName: s.name,
+          value: s.value.toFixed(2),
+          status: s.status
+        }));
+        return [...recentSensors, ...prev].slice(0, 100);
       });
     }, 1000);
 
@@ -176,9 +206,23 @@ function App() {
                 <Clock className="w-5 h-5" />
                 <span className="font-mono text-sm">{currentTime}</span>
               </div>
-              <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
-                <CheckCircle className="w-5 h-5 text-emerald-400" />
-                <span className="text-emerald-400 text-sm font-medium">System Online</span>
+              <div className={`flex items-center gap-2 px-4 py-2 rounded-lg border ${
+                systemStatus === 'NORMAL'
+                  ? 'bg-emerald-500/10 border-emerald-500/20'
+                  : systemStatus === 'WARNING'
+                  ? 'bg-amber-500/10 border-amber-500/20'
+                  : 'bg-red-500/10 border-red-500/20'
+              }`}>
+                {systemStatus === 'NORMAL' ? (
+                  <CheckCircle className="w-5 h-5 text-emerald-400" />
+                ) : (
+                  <AlertCircle className="w-5 h-5 text-amber-400" />
+                )}
+                <span className={`text-sm font-medium ${
+                  systemStatus === 'NORMAL' ? 'text-emerald-400' : 'text-amber-400'
+                }`}>
+                  System {systemStatus}
+                </span>
               </div>
             </div>
           </div>
@@ -186,72 +230,74 @@ function App() {
 
         {/* Main Content Area */}
         <div className="flex-1 overflow-y-auto p-8 space-y-6">
-          {/* Row 1: KPI Cards */}
+          {/* Zone 1: KPI Cards */}
           <div className="grid grid-cols-4 gap-6">
-            {/* Temperature KPI */}
+            {/* 현재상태 */}
             <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
               <div className="flex items-start justify-between mb-4">
-                <div className="p-3 bg-blue-500/10 rounded-lg">
-                  <Thermometer className="w-6 h-6 text-blue-400" />
+                <div className={`p-3 rounded-lg ${
+                  systemStatus === 'NORMAL' ? 'bg-emerald-500/10' : 'bg-red-500/10'
+                }`}>
+                  <Shield className={`w-6 h-6 ${
+                    systemStatus === 'NORMAL' ? 'text-emerald-400' : 'text-red-400'
+                  }`} />
                 </div>
-                <TrendingUp className="w-4 h-4 text-emerald-400" />
+                <div className={`w-2 h-2 rounded-full animate-pulse ${
+                  systemStatus === 'NORMAL' ? 'bg-emerald-400' : 'bg-red-400'
+                }`}></div>
               </div>
-              <p className="text-slate-400 text-sm mb-1">Avg Temperature</p>
-              <p className="text-3xl font-semibold text-white font-mono">{avgTemperature.toFixed(1)}<span className="text-lg text-slate-500">°C</span></p>
+              <p className="text-slate-400 text-sm mb-1">현재상태</p>
+              <p className={`text-3xl font-semibold font-mono ${
+                systemStatus === 'NORMAL' ? 'text-emerald-400' : 'text-red-400'
+              }`}>{systemStatus}</p>
             </div>
 
-            {/* Pressure KPI */}
-            <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
-              <div className="flex items-start justify-between mb-4">
-                <div className="p-3 bg-purple-500/10 rounded-lg">
-                  <Gauge className="w-6 h-6 text-purple-400" />
-                </div>
-                <TrendingUp className="w-4 h-4 text-emerald-400" />
-              </div>
-              <p className="text-slate-400 text-sm mb-1">Avg Pressure</p>
-              <p className="text-3xl font-semibold text-white font-mono">{avgPressure.toFixed(1)}<span className="text-lg text-slate-500"> kPa</span></p>
-            </div>
-
-            {/* Flow KPI */}
-            <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
-              <div className="flex items-start justify-between mb-4">
-                <div className="p-3 bg-emerald-500/10 rounded-lg">
-                  <Droplets className="w-6 h-6 text-emerald-400" />
-                </div>
-                <TrendingUp className="w-4 h-4 text-emerald-400" />
-              </div>
-              <p className="text-slate-400 text-sm mb-1">Avg Flow Rate</p>
-              <p className="text-3xl font-semibold text-white font-mono">{avgFlow.toFixed(1)}<span className="text-lg text-slate-500"> L/h</span></p>
-            </div>
-
-            {/* Health KPI */}
+            {/* 위험점수 */}
             <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
               <div className="flex items-start justify-between mb-4">
                 <div className="p-3 bg-amber-500/10 rounded-lg">
-                  <Activity className="w-6 h-6 text-amber-400" />
+                  <TrendingUp className="w-6 h-6 text-amber-400" />
                 </div>
-                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
+                <AlertCircle className="w-4 h-4 text-amber-400" />
               </div>
-              <p className="text-slate-400 text-sm mb-1">System Health</p>
-              <p className="text-3xl font-semibold text-white font-mono">{systemHealth.toFixed(0)}<span className="text-lg text-slate-500">%</span></p>
+              <p className="text-slate-400 text-sm mb-1">위험점수</p>
+              <p className="text-3xl font-semibold text-white font-mono">{avgRiskScore.toFixed(0)}</p>
+            </div>
+
+            {/* 가동시간 */}
+            <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
+              <div className="flex items-start justify-between mb-4">
+                <div className="p-3 bg-blue-500/10 rounded-lg">
+                  <Timer className="w-6 h-6 text-blue-400" />
+                </div>
+                <CheckCircle className="w-4 h-4 text-emerald-400" />
+              </div>
+              <p className="text-slate-400 text-sm mb-1">가동시간</p>
+              <p className="text-3xl font-semibold text-white font-mono">{uptime}</p>
+            </div>
+
+            {/* 알림수 */}
+            <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
+              <div className="flex items-start justify-between mb-4">
+                <div className="p-3 bg-purple-500/10 rounded-lg">
+                  <Bell className="w-6 h-6 text-purple-400" />
+                </div>
+                {alertCount > 0 && <AlertCircle className="w-4 h-4 text-red-400" />}
+              </div>
+              <p className="text-slate-400 text-sm mb-1">알림수</p>
+              <p className={`text-3xl font-semibold font-mono ${
+                alertCount > 0 ? 'text-red-400' : 'text-emerald-400'
+              }`}>{alertCount}</p>
             </div>
           </div>
 
-          {/* Row 2: Chart + Sensor Ranking */}
+          {/* Zone 2: 메인 분석 영역 */}
           <div className="grid grid-cols-3 gap-6">
-            {/* Left: Real-time Chart (65% / 2 columns) */}
+            {/* Left: 실시간 메인 그래프 (66% / 2 columns) */}
             <div className="col-span-2 bg-slate-800 border border-slate-700 rounded-lg p-6">
-              <div className="mb-6">
-                <h3 className="text-lg font-semibold text-white mb-2">Real-time Sensor Data</h3>
-                <p className="text-sm text-slate-400">Click sensors on the right to display (max 3)</p>
-                <div className="flex gap-2 mt-3">
-                  {selectedSensors.map((sensorId, idx) => (
-                    <div key={sensorId} className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 rounded border border-slate-600">
-                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: sensorColors[idx] }}></div>
-                      <span className="text-xs text-slate-300 font-mono">XMEAS_{sensorId}</span>
-                    </div>
-                  ))}
-                </div>
+              <div className="mb-4">
+                <h3 className="text-lg font-semibold text-white mb-2">실시간 메인 그래프 (Global Trend)</h3>
+                <p className="text-sm text-slate-400">오른쪽 센서를 클릭하여 차트에 표시 (최대 3개)</p>
               </div>
               <ResponsiveContainer width="100%" height={400}>
                 <LineChart data={chartData}>
@@ -284,15 +330,43 @@ function App() {
                       stroke={sensorColors[idx]}
                       strokeWidth={2}
                       dot={false}
+                      isAnimationActive={false}
                     />
                   ))}
                 </LineChart>
               </ResponsiveContainer>
+
+              {/* Selected Sensors - Below Chart */}
+              <div className="mt-4 pt-4 border-t border-slate-700">
+                <p className="text-xs text-slate-500 mb-3">선택된 센서 (클릭하여 제거)</p>
+                <div className="flex gap-2 flex-wrap">
+                  <AnimatePresence mode="popLayout">
+                    {selectedSensors.map((sensorId, idx) => (
+                      <motion.button
+                        key={sensorId}
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.8 }}
+                        transition={{ duration: 0.15 }}
+                        onClick={() => setSelectedSensors(selectedSensors.filter(id => id !== sensorId))}
+                        className="flex items-center gap-2 px-3 py-2 bg-slate-700 rounded-lg border border-slate-600 hover:border-slate-500 hover:bg-slate-600 transition-all cursor-pointer"
+                      >
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: sensorColors[idx] }}></div>
+                        <span className="text-sm text-slate-300 font-mono">XMEAS_{sensorId}</span>
+                        <span className="text-slate-500 hover:text-slate-300 ml-1">×</span>
+                      </motion.button>
+                    ))}
+                  </AnimatePresence>
+                  {selectedSensors.length === 0 && (
+                    <p className="text-sm text-slate-500 italic">센서를 선택해주세요</p>
+                  )}
+                </div>
+              </div>
             </div>
 
-            {/* Right: Top Risk Sensors (35% / 1 column) */}
+            {/* Right: 위험도 랭킹 (33% / 1 column) */}
             <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
-              <h3 className="text-lg font-semibold text-white mb-4">Top Risk Sensors</h3>
+              <h3 className="text-lg font-semibold text-white mb-4">위험도 랭킹 (Ranking)</h3>
               <div className="space-y-3 max-h-[480px] overflow-y-auto">
                 <AnimatePresence>
                   {sensors.slice(0, 15).map((sensor, index) => (
@@ -302,7 +376,7 @@ function App() {
                       initial={{ opacity: 0, x: 20 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: -20 }}
-                      transition={{ duration: 0.3 }}
+                      transition={{ duration: 0.15, layout: { duration: 0.2 } }}
                       onClick={() => handleSensorClick(sensor.id)}
                       className={`p-3 rounded-lg border cursor-pointer transition-all ${
                         selectedSensors.includes(sensor.id)
@@ -312,7 +386,7 @@ function App() {
                     >
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-medium text-white font-mono">{sensor.name}</span>
-                        {sensor.status === 'warning' ? (
+                        {sensor.status === 'Critical' ? (
                           <AlertCircle className="w-4 h-4 text-amber-400" />
                         ) : (
                           <CheckCircle className="w-4 h-4 text-emerald-400" />
@@ -327,7 +401,7 @@ function App() {
                         </div>
                         <div className="w-full bg-slate-600 rounded-full h-1.5">
                           <div
-                            className={`h-1.5 rounded-full transition-all ${
+                            className={`h-1.5 rounded-full transition-all duration-200 ${
                               sensor.risk > 70 ? 'bg-red-500' : sensor.risk > 40 ? 'bg-amber-500' : 'bg-emerald-500'
                             }`}
                             style={{ width: `${sensor.risk}%` }}
@@ -338,6 +412,49 @@ function App() {
                   ))}
                 </AnimatePresence>
               </div>
+            </div>
+          </div>
+
+          {/* Zone 3: 상세 데이터 (Data Grid/Log) */}
+          <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
+            <h3 className="text-lg font-semibold text-white mb-4">상세 데이터 (Data Grid/Log)</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-700">
+                    <th className="text-left text-sm font-medium text-slate-400 pb-3 px-4">No</th>
+                    <th className="text-left text-sm font-medium text-slate-400 pb-3 px-4">Time</th>
+                    <th className="text-left text-sm font-medium text-slate-400 pb-3 px-4">Sensor Name</th>
+                    <th className="text-left text-sm font-medium text-slate-400 pb-3 px-4">Value</th>
+                    <th className="text-left text-sm font-medium text-slate-400 pb-3 px-4">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dataLog.slice(0, 20).map((row, idx) => (
+                    <motion.tr
+                      key={`${row.no}-${idx}`}
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.15 }}
+                      className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors"
+                    >
+                      <td className="py-3 px-4 text-sm text-slate-300 font-mono">{String(row.no).padStart(2, '0')}</td>
+                      <td className="py-3 px-4 text-sm text-slate-300 font-mono">{row.time}</td>
+                      <td className="py-3 px-4 text-sm text-white font-mono">{row.sensorName}</td>
+                      <td className="py-3 px-4 text-sm text-slate-300 font-mono">{row.value}</td>
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${
+                          row.status === 'Critical'
+                            ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                            : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        }`}>
+                          {row.status}
+                        </span>
+                      </td>
+                    </motion.tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
